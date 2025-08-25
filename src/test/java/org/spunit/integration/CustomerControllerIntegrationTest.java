@@ -8,8 +8,11 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.*;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.context.annotation.Import;
 import org.spunit.entity.Customer;
-import org.spunit.repository.CustomerRepository;
+import org.spunit.service.CustomerService;
+import org.spunit.testsupport.InMemoryCustomerService;
+import org.spunit.testsupport.TestBeans;
 
 import java.util.Arrays;
 import java.util.List;
@@ -18,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
+@Import(TestBeans.class)
 class CustomerControllerIntegrationTest {
 
     @LocalServerPort
@@ -27,7 +31,7 @@ class CustomerControllerIntegrationTest {
     private TestRestTemplate restTemplate;
 
     @Autowired
-    private CustomerRepository repository;
+    private CustomerService customerService;
 
     private String baseUrl = "http://localhost:";
 
@@ -35,12 +39,13 @@ class CustomerControllerIntegrationTest {
     void setUp() {
         baseUrl = baseUrl.concat(port + "/api/customers");
         // Ensure clean, predictable data before each test
-        repository.deleteAll();
-        repository.saveAll(Arrays.asList(
-                new Customer("Alok Pol", "alok@gmail.com"),
-                new Customer("Asha Patil", "asha@gmail.com"),
-                new Customer("Vikram Rao", "vikram@gmail.com")
-        ));
+        if (customerService instanceof InMemoryCustomerService ims) {
+            ims.resetWith(Arrays.asList(
+                    new Customer("Alok Pol", "alok@gmail.com"),
+                    new Customer("Asha Patil", "asha@gmail.com"),
+                    new Customer("Vikram Rao", "vikram@gmail.com")
+            ));
+        }
     }
 
     @Test
@@ -111,13 +116,13 @@ class CustomerControllerIntegrationTest {
     @Test
     void shouldDeleteCustomerAndSubsequentGetReturnsNotFound() {
         Customer newCustomer = new Customer("Geeta Patel", "geeta.patel@gmail.com");
-        ResponseEntity<Customer> createResp = restTemplate.postForEntity(baseUrl, newCustomer, Customer.class);
-        Long id = createResp.getBody().getId();
+        ResponseEntity<java.util.Map> createResp = restTemplate.postForEntity(baseUrl, newCustomer, java.util.Map.class);
+        Long id = ((Number)((java.util.Map)createResp.getBody().get("data")).get("id")).longValue();
 
         ResponseEntity<Void> deleteResp = restTemplate.exchange(baseUrl + "/" + id, HttpMethod.DELETE, HttpEntity.EMPTY, Void.class);
-        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, deleteResp.getStatusCode());
+        assertEquals(HttpStatus.NO_CONTENT, deleteResp.getStatusCode());
 
-        ResponseEntity<Customer> getAfterDelete = restTemplate.getForEntity(baseUrl + "/" + id, Customer.class);
-        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, getAfterDelete.getStatusCode());
+        ResponseEntity<Object> getAfterDelete = restTemplate.getForEntity(baseUrl + "/" + id, Object.class);
+        assertEquals(HttpStatus.NOT_FOUND, getAfterDelete.getStatusCode());
     }
 }
