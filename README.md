@@ -10,8 +10,8 @@ A small Customer app with a simple path from code to a running service.
 - Try: <http://localhost:8080/swagger-ui/index.html>
 
 ## PostgreSQL with Docker
-Build the PostgreSQL image:
-- docker buildx build -t postgresql-16.10-alpine-img -f dockerfile.postgres .
+Build the PostgreSQL image (from the postgres stage in the main dockerfile):
+- docker build -t postgresql-16.10-alpine-img -f dockerfile --target postgres .
 
 Run the PostgreSQL container:
 - docker run -d --name postgresql-16.10-alpine-cont -p 5432:5432 postgresql-16.10-alpine-img
@@ -31,41 +31,8 @@ Configure the app to use this database by setting environment variables when you
 - SPRING_DATASOURCE_PASSWORD=postgre
 
 ## How it deploys (at a glance)
-GitHub → Jenkins → Amazon ECR → AWS CodePipeline (ECR source) → AWS ECS (Fargate) → Running App
+GitHub → AWS CodePipeline → AWS CodeBuild → Amazon ECR → AWS ECS → Running App
 
-
-## CI/CD with Jenkins + AWS
-This repository includes:
-- Dockerfile for containerizing the Spring Boot app.
-- Jenkinsfile for building, testing, containerizing, and pushing the image to Amazon ECR.
-
-High-level flow:
-1. Developer pushes to main branch on GitHub/CodeCommit.
-2. Jenkins job is triggered by webhook or poll.
-3. Jenkins runs Maven tests and builds the jar, builds the Docker image and pushes to ECR with two tags: short git SHA and latest.
-4. AWS CodePipeline is configured with an ECR source. When a new image tag appears, it triggers deployment to ECS (Fargate) which pulls the image from ECR and runs the container.
-
-Jenkins prerequisites:
-- Jenkins agent with Docker CLI, Docker daemon access, and AWS CLI v2 installed.
-- Jenkins credentials configured as Secret Text credentials with IDs:
-  - AWS_REGION (e.g., us-east-1)
-  - AWS_ACCOUNT_ID (12-digit account ID)
-  - ECR_REPOSITORY (e.g., start-to-end-deployment-flow)
-- The agent has IAM permissions for ECR: ecr:GetAuthorizationToken, ecr:BatchCheckLayerAvailability, ecr:CompleteLayerUpload, ecr:CreateRepository, ecr:DescribeRepositories, ecr:InitiateLayerUpload, ecr:PutImage, ecr:UploadLayerPart.
-- Optional: Configure a webhook from GitHub to Jenkins or use Poll SCM.
-
-Local test of container (after mvn package):
-- docker build -t start-to-end:latest -f Dockerfile .
-- docker run -p 8080:8080 --env SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/mydb --env SPRING_DATASOURCE_USERNAME=postgre --env SPRING_DATASOURCE_PASSWORD=postgre start-to-end:latest
-
-AWS setup (outline):
-- Create an ECR repository named as in ECR_REPOSITORY.
-- Create an ECS Cluster and Fargate Service/Task Definition exposing port 8080 and pulling from ECR.
-- Create a CodePipeline with ECR (repository + tag pattern) as Source, and ECS Deploy as the Deploy stage.
-
-Notes:
-- The application listens on port 8080 (exposed in Dockerfile). Ensure your ECS service security group allows inbound 80/8080 from the ALB or public as needed.
-- Database connectivity is configured via environment variables; set them in the ECS Task Definition if you use a managed PostgreSQL (RDS) or another container.
 
 ## License
 See the LICENSE file in this repository.
