@@ -3,6 +3,36 @@ version: 0.2
 phases:
   pre_build:
     commands:
+      - echo Starting lightweight PostgreSQL container for build...
+      - CONTAINER_NAME=ci-postgres
+      - |
+        if [ "$(docker ps -aq -f name=$CONTAINER_NAME)" ]; then
+          echo "Cleaning up existing $CONTAINER_NAME container...";
+          docker rm -f $CONTAINER_NAME || true;
+        fi
+      - docker pull postgres:16-alpine
+      - |
+        docker run -d --name $CONTAINER_NAME \
+          -e POSTGRES_DB=mydb \
+          -e POSTGRES_USER=postgre \
+          -e POSTGRES_PASSWORD=postgre \
+          -p 5432:5432 postgres:16-alpine
+      - echo Waiting for PostgreSQL to become ready...
+      - |
+        set -e; \
+        for i in {1..60}; do \
+          if docker exec $CONTAINER_NAME pg_isready -U postgre -d mydb >/dev/null 2>&1; then \
+            echo "PostgreSQL is ready"; \
+            break; \
+          fi; \
+          echo "Waiting for PostgreSQL ($i/60)..."; \
+          sleep 1; \
+          if [ "$i" -eq 60 ]; then \
+            echo "PostgreSQL did not become ready in time"; \
+            docker logs $CONTAINER_NAME || true; \
+            exit 1; \
+          fi; \
+        done
       - mvn clean install
       - echo Logging in to Amazon ECR...
       - aws --version
@@ -31,6 +61,11 @@ phases:
       - echo $DOCKER_CONTAINER_NAME
       - echo printing imagedefinitions.json
       - cat imagedefinitions.json
+      - echo Stopping and removing PostgreSQL container...
+      - |
+        if [ "$(docker ps -aq -f name=ci-postgres)" ]; then
+          docker rm -f ci-postgres || true;
+        fi
 
 artifacts:
   files:
