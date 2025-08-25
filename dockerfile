@@ -7,8 +7,8 @@ EXPOSE 5432
 VOLUME ["/var/lib/postgresql/data"]
 
 # --- Application stage (default final image) ---
-# Use the official eclipse-temurin:21-jre-alpine image from Docker Hub
-FROM eclipse-temurin:21-jre-alpine
+# Use the official OpenJDK 17 image from Docker Hub
+FROM openjdk:17
 
 # Set working directory inside the container
 WORKDIR /app
