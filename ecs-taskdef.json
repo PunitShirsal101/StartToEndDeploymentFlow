@@ -1,0 +1,40 @@
+{
+  "family": "start-to-end-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::123456789012:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "app",
+      "image": "123456789012.dkr.ecr.ap-south-1.amazonaws.com/start-to-end-ecr:latest",
+      "portMappings": [
+        { "containerPort": 8080, "hostPort": 8080, "protocol": "tcp" }
+      ],
+      "essential": true,
+      "environment": [
+        { "name": "SPRING_DATASOURCE_URL", "value": "jdbc:postgresql://postgres.example.internal:5432/mydb" },
+        { "name": "SPRING_DATASOURCE_USERNAME", "value": "postgre" },
+        { "name": "SPRING_DATASOURCE_PASSWORD", "value": "postgre" },
+        { "name": "JAVA_OPTS", "value": "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/start-to-end",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      }
+    }
+  ]
+}

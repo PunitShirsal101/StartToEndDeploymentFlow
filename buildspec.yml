@@ -1,0 +1,44 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: ap-south-1            # override in CodeBuild project if needed
+    IMAGE_REPO_NAME: start-to-end-ecr # override with your ECR repo name
+    IMAGE_TAG: latest                 # CodePipeline can override with commit id
+  parameter-store:
+    # optionally map secrets from SSM Parameter Store for DB creds if you build with tests
+    # DB_USER: "/myapp/DB_USER"
+    # DB_PASS: "/myapp/DB_PASS"
+
+phases:
+  install:
+    runtime-versions:
+      docker: 20
+    commands:
+      - echo Installing jq if needed
+      - if ! command -v jq >/dev/null 2>&1; then echo 'jq not present'; fi
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR in $AWS_REGION
+      - aws --version
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query account --output text)
+      - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO_NAME
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $REPOSITORY_URI
+      - echo Build starting on `date`
+      - mvn -q -DskipTests clean package
+  build:
+    commands:
+      - echo Building the Docker image...
+      - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+      - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - echo Writing image definitions file for ECS deployment
+      - printf '[{"name":"app","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+artifacts:
+  files:
+    - imagedefinitions.json
+    - ecs-taskdef.json
+    - appspec.yaml

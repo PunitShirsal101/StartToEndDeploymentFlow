@@ -1,0 +1,7 @@
+**/.git
+**/.idea
+**/target/*
+!target/CICD.jar
+**/node_modules
+**/.DS_Store
+**/data
