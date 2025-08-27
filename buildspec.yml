@@ -2,11 +2,15 @@ version: 0.2
 
 env:
   variables:
-    AWS_REGION: ap-south-1            # override in CodeBuild project if needed
+    AWS_REGION: us-east-1            # override in CodeBuild project if needed
     IMAGE_REPO_NAME: start-to-end-ecr # override with your ECR repo name
     IMAGE_TAG: latest                 # CodePipeline can override with commit id
+    DB_NAME: mydb
+    DB_USER: postgre
+    DB_PASS: postgre
+    DB_PORT: "5432"
   parameter-store:
-    # optionally map secrets from SSM Parameter Store for DB creds if you build with tests
+    # Optionally map secrets from SSM Parameter Store for DB creds if you don't want them in plaintext
     # DB_USER: "/myapp/DB_USER"
     # DB_PASS: "/myapp/DB_PASS"
 
@@ -15,8 +19,9 @@ phases:
     runtime-versions:
       docker: 20
     commands:
-      - echo Installing jq if needed
+      - echo Installing utilities (jq, curl) if needed
       - if ! command -v jq >/dev/null 2>&1; then echo 'jq not present'; fi
+      - if ! command -v curl >/dev/null 2>&1; then echo 'curl present in CodeBuild standard image'; fi
   pre_build:
     commands:
       - echo Logging in to Amazon ECR in $AWS_REGION
@@ -24,10 +29,35 @@ phases:
       - ACCOUNT_ID=$(aws sts get-caller-identity --query account --output text)
       - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO_NAME
       - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $REPOSITORY_URI
+      - echo Starting ephemeral PostgreSQL for CI on port $DB_PORT
+      - |
+        if [ -z "$(docker ps -q -f name=ci-postgres)" ]; then
+          docker run -d --rm --name ci-postgres \
+            -e POSTGRES_DB=$DB_NAME \
+            -e POSTGRES_USER=$DB_USER \
+            -e POSTGRES_PASSWORD=$DB_PASS \
+            -p $DB_PORT:5432 \
+            --health-cmd="pg_isready -U $DB_USER" \
+            --health-interval=5s --health-timeout=3s --health-retries=20 \
+            postgres:15-alpine;
+        fi
+      - echo Waiting for PostgreSQL to be healthy...
+      - |
+        for i in {1..60}; do
+          status=$(docker inspect --format='{{json .State.Health.Status}}' ci-postgres 2>/dev/null || echo '"starting"');
+          echo "Postgres health: $status";
+          if [ "$status" = '"healthy"' ]; then echo "Postgres is healthy"; break; fi; sleep 2;
+        done
       - echo Build starting on `date`
-      - mvn -q -DskipTests clean package
+      - echo Running unit/integration tests against PostgreSQL (Spring config reads env vars)
+      - export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:$DB_PORT/$DB_NAME
+      - export SPRING_DATASOURCE_USERNAME=$DB_USER
+      - export SPRING_DATASOURCE_PASSWORD=$DB_PASS
+      - mvn -q clean verify
   build:
     commands:
+      - echo Packaging application JAR (finalName=CICD)
+      - mvn -q -DskipTests package
       - echo Building the Docker image...
       - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
       - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG
@@ -37,6 +67,8 @@ phases:
       - docker push $REPOSITORY_URI:$IMAGE_TAG
       - echo Writing image definitions file for ECS deployment
       - printf '[{"name":"app","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+      - echo Stopping CI PostgreSQL container
+      - docker rm -f ci-postgres || true
 artifacts:
   files:
     - imagedefinitions.json
